@@ -1,0 +1,31 @@
+[package]
+name = "arsync"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = "4.5.9"
+once_cell = "1.19.0"
+serde_derive = "1.0.204"
+tokio = { version = "1.38.0", features = ["full"] }
+toml = "0.8.14"
+warp = "0.3.7"
+anyhow = "1.0.86"
+serde = "1.0.204"
+alipan = { path = "../alipan", features = ["backtrace"] }
+serde_json = "1.0.120"
+async-trait = "0.1.81"
+url = "2.5.2"
+urlencoding = "2.1.3"
+tracing = "0.1.40"
+base64 = "0.22.1"
+hex = "0.4.3"
+md5 = "0.7.0"
+aead = { version = "0.5.2", features = ["bytes", "stream"] }
+aes-gcm = { version = "0.10.3", features = ["stream"] }
+crypto = { version = "0.5.1", features = ["aead", "cipher"] }
+crypto_secretstream = "0.2.0"
+async-recursion = "1.1.1"
+reqwest = "0.12.5"
+rand = "0.8.5"
+sha1 = "0.10.6"
