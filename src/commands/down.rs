@@ -174,6 +174,7 @@ async fn down_sync_folder(
             }
         }
         if delete {
+            println!("删除: {:?}", p);
             local_delete = true;
             if m.is_file() {
                 tokio::fs::remove_file(p).await?;
@@ -220,11 +221,11 @@ async fn down_sync_folder(
                 }
             }
         }
-        if !local_name_list.contains(&name) {
-            let path = std::path::Path::new(&target_path).join(name);
-            let path_string = path.to_str().unwrap().to_string();
-            match x.r#type {
-                AdriveOpenFileType::File => {
+        let path = std::path::Path::new(&target_path).join(&name);
+        let path_string = path.to_str().unwrap().to_string();
+        match x.r#type {
+            AdriveOpenFileType::File => {
+                if !local_name_list.contains(&name) {
                     down_file(
                         Arc::clone(&client),
                         drive_id.clone(),
@@ -234,17 +235,19 @@ async fn down_sync_folder(
                     )
                     .await?;
                 }
-                AdriveOpenFileType::Folder => {
+            }
+            AdriveOpenFileType::Folder => {
+                if !local_name_list.contains(&name) {
                     tokio::fs::create_dir_all(path).await?;
-                    down_sync_folder(
-                        Arc::clone(&client),
-                        drive_id.clone(),
-                        x.file_id.clone(),
-                        sync_password.clone(),
-                        path_string,
-                    )
-                    .await?;
                 }
+                down_sync_folder(
+                    Arc::clone(&client),
+                    drive_id.clone(),
+                    x.file_id.clone(),
+                    sync_password.clone(),
+                    path_string,
+                )
+                .await?;
             }
         }
     }
@@ -272,8 +275,8 @@ async fn down_file(
         down_to_file_with_password(url, path_tmp.as_str(), sync_password).await?;
     } else {
         down_to_file(url, path_tmp.as_str()).await?;
-        move_file(path_tmp.as_str(), local_file_path.as_str()).await?;
     }
+    move_file(path_tmp.as_str(), local_file_path.as_str()).await?;
     Ok(())
 }
 
