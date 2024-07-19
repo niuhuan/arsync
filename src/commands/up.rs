@@ -1,24 +1,18 @@
 use crate::common::{
-    check_passbook_password, create_passbook_password, find_passbook_folder,
+    check_passbook_password, create_passbook_password, delete_remote_file, find_passbook_folder,
     list_local_folder_file, list_remote_folder_file,
 };
 use crate::config::adrive_client_for_config;
 use crate::custom_crypto::{decrypt_file_name, encrypt_file_name, encryptor_from_key};
-use alipan::re_exports::chrono::{Local, TimeZone};
-use alipan::re_exports::tracing::Metadata;
-use alipan::re_exports::{chrono, tokio_stream};
 use alipan::response::AdriveOpenFile;
 use alipan::AdriveOpenFileType::Folder;
-use alipan::{
-    AdriveAsyncTaskState, AdriveClient, AdriveOpenFilePartInfoCreate, AdriveOpenFileType,
-    CheckNameMode,
-};
+use alipan::{AdriveClient, AdriveOpenFilePartInfoCreate, AdriveOpenFileType, CheckNameMode};
 use anyhow::Context;
+use chrono::{Local, TimeZone};
 use clap::{arg, Command};
 use sha1::Digest;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
 pub const COMMAND_NAME: &str = "up";
@@ -49,21 +43,21 @@ pub(crate) async fn run_sub_command(args: &clap::ArgMatches) -> anyhow::Result<(
     let source_path = source_url.path();
     let target_path = target_url.path();
     if !"file".eq(source_url.scheme()) {
-        anyhow::bail!("source url scheme must be file");
+        return Err(anyhow::anyhow!("原路径必须是file协议"));
     }
     let metadata = tokio::fs::metadata(source_path)
         .await
-        .with_context(|| format!("source path not found: {}", source_path))?;
+        .with_context(|| format!("原路径未找到 : {}", source_path))?;
     if !metadata.is_dir() {
         return Err(anyhow::anyhow!("原路径必须是文件夹"));
     }
     if !"adrive".eq(target_url.scheme()) {
-        anyhow::bail!("target url scheme must be adrive");
+        return Err(anyhow::anyhow!("目标路径必须是adrive协议"));
     }
     let target_sp = target_path.split('/').collect::<Vec<&str>>();
     if target_sp.len() < 3 || target_sp[0] != "" {
         return Err(anyhow::anyhow!(
-            "target path must be like `adrive:///drive_id/folder_path`"
+            "目标路径必须是 `adrive:///{{DriveID}}/{{文件夹路径}}`"
         ));
     }
     let drive_id = target_sp[1].to_owned();
@@ -129,7 +123,7 @@ async fn up_sync_folder(
     folder_id: String,
     sync_password: Option<Vec<u8>>,
 ) -> anyhow::Result<()> {
-    println!("同步 : {} => {}", source_path, folder_id);
+    println!("正在同步 : {}", source_path);
     // 读取本地的文件
     let metadata_list = list_local_folder_file(&source_path).await?;
     // 读取远端文件
@@ -157,6 +151,7 @@ async fn up_sync_folder(
             local_folder_list.push(name);
         }
     }
+    println!("已拉取云端文件 正在比对");
     for x in &open_file_list {
         let mut delete = true;
         let mut name = x.name.clone();
@@ -165,59 +160,35 @@ async fn up_sync_folder(
             if let Ok(n) = decrypt_file_name(&name, sync_password) {
                 name = n;
             } else {
-                println!("解密失败 : {}", x.name);
+                println!("文件名解密失败，删除 : {}", x.name);
                 error_file_name = true;
             }
         }
-        println!("检查 ：{} => {}", name, x.name);
         if !error_file_name {
             match x.r#type {
                 AdriveOpenFileType::File => {
                     if let Some(date) = local_file_update_map.get(&name) {
                         if x.updated_at.timestamp() >= date.timestamp() {
                             delete = false;
+                        } else {
+                            println!("云端文件更旧，删除并稍后重新上传 : {}", name)
                         }
+                    } else {
+                        println!("未找到文件，删除 : {}", name)
                     }
                 }
                 Folder => {
                     if local_folder_list.contains(&name) {
                         delete = false;
+                    } else {
+                        println!("未找到文件夹，删除 : {}", name)
                     }
                 }
             }
         }
         if delete {
-            println!("删除 ： {}", x.name);
             has_deleted = true;
-            let result = client
-                .adrive_open_file_recyclebin_trash()
-                .await
-                .drive_id(x.drive_id.as_str())
-                .file_id(x.file_id.as_str())
-                .request()
-                .await?;
-            if let Some(task) = result.async_task_id {
-                if !task.is_empty() {
-                    let mut state = AdriveAsyncTaskState::Running;
-                    while state == AdriveAsyncTaskState::Running {
-                        tokio::time::sleep(Duration::new(5, 0)).await;
-                        state = client
-                            .adrive_open_file_async_task_get()
-                            .await
-                            .async_task_id(task.as_str())
-                            .request()
-                            .await?
-                            .state;
-                        match state {
-                            AdriveAsyncTaskState::Failed => {
-                                return Err(anyhow::anyhow!("文件删除失败"));
-                            }
-                            AdriveAsyncTaskState::Succeed => {}
-                            AdriveAsyncTaskState::Running => {}
-                        }
-                    }
-                }
-            }
+            delete_remote_file(Arc::clone(&client), x.drive_id.clone(), x.file_id.clone()).await?;
         }
     }
     if has_deleted {
@@ -245,7 +216,9 @@ async fn up_sync_folder(
                 continue;
             }
             up_sync_file(
-                format!("{}/{}", source_path, name),
+                pb.to_str()
+                    .with_context(|| "file name is invalid")?
+                    .to_string(),
                 m,
                 Arc::clone(&client),
                 drive_id.clone(),
@@ -271,7 +244,9 @@ async fn up_sync_folder(
                     .file_id
             };
             up_sync_folder(
-                format!("{}/{}", source_path, name,),
+                pb.to_str()
+                    .with_context(|| "file name is invalid")?
+                    .to_string(),
                 Arc::clone(&client),
                 drive_id.clone(),
                 remote_dir_id,
@@ -370,24 +345,29 @@ async fn password_sha1(file_path: &str, password: &[u8]) -> anyhow::Result<(Stri
     let mut hasher = sha1::Sha1::new();
     let mut encryptor = encryptor_from_key(password)?;
     let mut reader = tokio::io::BufReader::new(file);
-    let mut buffer = [0u8; 1024];
+    let mut buffer = [0u8; 1 << 20];
     let mut size = 0;
+    let mut position = 0;
     loop {
-        let n = reader.read(&mut buffer).await?;
+        let n = reader.read(&mut buffer[position..]).await?;
+        position += n;
         if n == 0 {
+            let b = encryptor
+                .encrypt_last(&buffer[..position])
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            hasher.update(b.as_slice());
+            size += b.len();
             break;
         }
-        let b = encryptor
-            .encrypt_next(&buffer[..n])
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-        hasher.update(b.as_slice());
-        size += b.len();
+        if position == buffer.len() {
+            position = 0;
+            let b = encryptor
+                .encrypt_next(&buffer[..n])
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            hasher.update(b.as_slice());
+            size += b.len();
+        }
     }
-    let b = encryptor
-        .encrypt_last(Vec::<u8>::new().as_slice())
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-    hasher.update(b.as_slice());
-    size += b.len();
     let result = hasher.finalize();
     Ok((hex::encode(result), size as u64))
 }
@@ -397,7 +377,7 @@ async fn sha1_file(file: &str) -> anyhow::Result<String> {
     let mut hasher = sha1::Sha1::new();
     let file = tokio::fs::File::open(file).await?;
     let mut reader = tokio::io::BufReader::new(file);
-    let mut buffer = [0u8; 1024];
+    let mut buffer = [0u8; 1 << 10];
     loop {
         let n = reader.read(&mut buffer).await?;
         if n == 0 {
@@ -473,32 +453,38 @@ async fn put_steam_with_password(
     path: &str,
     password: &[u8],
 ) -> anyhow::Result<()> {
-    let mut buffer = vec![0u8; 1 << 10];
+    let mut buffer = vec![0u8; 1 << 20];
     let file = tokio::fs::File::open(path).await?;
     let mut reader = tokio::io::BufReader::new(file);
     let mut encryptor = encryptor_from_key(password)?;
+    let mut position = 0;
     loop {
-        let n = reader.read(&mut buffer).await?;
+        let n = reader.read(&mut buffer[position..]).await?;
+        position += n;
         if n == 0 {
+            let enc = encryptor.encrypt_last(&buffer[..position]);
+            match enc {
+                Ok(vec) => {
+                    sender.send(Ok(vec)).await?;
+                }
+                Err(err) => {
+                    sender.send(Err(anyhow::anyhow!("{}", err))).await?;
+                    return Err(anyhow::anyhow!("{}", err));
+                }
+            }
             break;
         }
-        match encryptor.encrypt_next(&buffer[..n]) {
-            Ok(vec) => {
-                sender.send(Ok(vec)).await?;
+        if position == buffer.len() {
+            position = 0;
+            match encryptor.encrypt_next(&buffer[..]) {
+                Ok(vec) => {
+                    sender.send(Ok(vec)).await?;
+                }
+                Err(err) => {
+                    sender.send(Err(anyhow::anyhow!("{}", err))).await?;
+                    return Err(anyhow::anyhow!("{}", err));
+                }
             }
-            Err(err) => {
-                sender.send(Err(anyhow::anyhow!("{}", err))).await?;
-                return Err(anyhow::anyhow!("{}", err));
-            }
-        }
-    }
-    match encryptor.encrypt_last(Vec::<u8>::new().as_slice()) {
-        Ok(vec) => {
-            sender.send(Ok(vec)).await?;
-        }
-        Err(err) => {
-            sender.send(Err(anyhow::anyhow!("{}", err))).await?;
-            return Err(anyhow::anyhow!("{}", err));
         }
     }
     Ok(())

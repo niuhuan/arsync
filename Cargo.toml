@@ -29,3 +29,9 @@ async-recursion = "1.1.1"
 reqwest = "0.12.5"
 rand = "0.8.5"
 sha1 = "0.10.6"
+aes = "0.8.4"
+chrono = "0.4.38"
+futures-util = { version = "0.3.30", features = ["futures-io", "tokio-io"] }
+tokio-stream = "0.1.15"
+futures = "0.3.30"
+tokio-util = { version = "0.7.11", features = ["io"] }

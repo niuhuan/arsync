@@ -2,13 +2,17 @@ use crate::custom_crypto::{
     decrypt_base64, decrypt_file_name, encrypt_buff_to_base64, encrypt_file_name,
 };
 use alipan::response::AdriveOpenFile;
-use alipan::{AdriveClient, AdriveOpenFilePartInfoCreate, AdriveOpenFileType, CheckNameMode};
+use alipan::{
+    AdriveAsyncTaskState, AdriveClient, AdriveOpenFilePartInfoCreate, AdriveOpenFileType,
+    CheckNameMode,
+};
 use anyhow::Context;
 use reqwest::Body;
 use serde_derive::{Deserialize, Serialize};
 use std::fs::Metadata;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub async fn find_passbook_folder(
     client: &Arc<AdriveClient>,
@@ -191,4 +195,41 @@ fn random_string(len: usize) -> Vec<u8> {
         .take(len)
         .collect::<Vec<u8>>();
     buff
+}
+
+pub async fn delete_remote_file(
+    client: Arc<AdriveClient>,
+    drive_id: String,
+    file_id: String,
+) -> anyhow::Result<()> {
+    let result = client
+        .adrive_open_file_recyclebin_trash()
+        .await
+        .drive_id(drive_id)
+        .file_id(file_id)
+        .request()
+        .await?;
+    if let Some(task) = result.async_task_id {
+        if !task.is_empty() {
+            let mut state = AdriveAsyncTaskState::Running;
+            while state == AdriveAsyncTaskState::Running {
+                tokio::time::sleep(Duration::new(5, 0)).await;
+                state = client
+                    .adrive_open_file_async_task_get()
+                    .await
+                    .async_task_id(task.as_str())
+                    .request()
+                    .await?
+                    .state;
+                match state {
+                    AdriveAsyncTaskState::Failed => {
+                        return Err(anyhow::anyhow!("文件删除失败"));
+                    }
+                    AdriveAsyncTaskState::Succeed => {}
+                    AdriveAsyncTaskState::Running => {}
+                }
+            }
+        }
+    }
+    Ok(())
 }
