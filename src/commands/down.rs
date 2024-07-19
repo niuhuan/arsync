@@ -111,6 +111,7 @@ async fn down_sync_folder(
     sync_password: Option<Vec<u8>>,
     target_path: String,
 ) -> anyhow::Result<()> {
+    println!("从云端同步: {}", target_path);
     // 读取远端文件
     let mut open_file_list =
         list_remote_folder_file(&client, drive_id.clone(), folder_id.clone()).await?;
@@ -261,7 +262,7 @@ async fn down_file(
     sync_password: Option<Vec<u8>>,
     local_file_path: String,
 ) -> anyhow::Result<()> {
-    println!("down file: {}", local_file_path);
+    println!("从云端下载: {}", local_file_path);
     let path_tmp = format!("{}.tmp", local_file_path);
     let url = client
         .adrive_open_file_get_download_url()
