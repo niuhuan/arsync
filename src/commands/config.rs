@@ -1,6 +1,6 @@
 use crate::config;
 use alipan::GrantType;
-use clap::Command;
+use clap::{arg, Command};
 use serde_json::json;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -15,20 +15,27 @@ pub fn command() -> Command {
 }
 
 fn args() -> Vec<clap::Arg> {
-    vec![]
+    vec![arg!(--port <PASSWORD> "端口 默认是58080").required(false)]
 }
 
-pub(crate) async fn run_sub_command(_args: &clap::ArgMatches) -> anyhow::Result<()> {
+pub(crate) async fn run_sub_command(args: &clap::ArgMatches) -> anyhow::Result<()> {
     // run warp server
-    run_warp_server().await?;
+    let port = args
+        .get_one::<String>("port")
+        .map_or("58080", |v| v.as_str())
+        .parse::<u16>()?;
+    run_warp_server(port).await?;
     Ok(())
 }
 
-async fn run_warp_server() -> anyhow::Result<()> {
-    println!("Server started at http://localhost:58080/html/index.html");
-    println!("Press Ctrl+C to stop the server after you finish the configuration");
+async fn run_warp_server(port: u16) -> anyhow::Result<()> {
+    println!(
+        "打开网页配置app以及账户信息： http://localhost:{}/html/index.html",
+        port
+    );
+    println!("配置完成后，请按 Ctrl+C 停止服务");
     let routes = index().or(api());
-    warp::serve(routes).run(([127, 0, 0, 1], 58080)).await;
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
     Ok(())
 }
 
@@ -166,5 +173,5 @@ async fn oauth_authorize_body_inner(
     let access_token = alipan::AccessToken::wrap_oauth_token(raw_token);
     config::set_access_token(access_token.clone()).await?;
 
-    Ok(warp::reply::html("Authorization success, you can close this page now").into_response())
+    Ok(warp::reply::html("认证成功，请关闭此页面").into_response())
 }

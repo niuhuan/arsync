@@ -29,6 +29,9 @@ pub async fn find_passbook_folder(
         .request()
         .await?;
     for x in list.items {
+        if is_ignore_file(x.name.as_str()) {
+            continue;
+        }
         if x.name.eq("passbook") {
             passbook = Some(x);
             continue;
@@ -45,6 +48,9 @@ pub async fn find_passbook_folder(
             .request()
             .await?;
         for x in list.items {
+            if is_ignore_file(x.name.as_str()) {
+                continue;
+            }
             if x.name.eq("passbook") {
                 passbook = Some(x);
                 continue;
@@ -69,6 +75,9 @@ pub async fn list_remote_folder_file(
         .request()
         .await?;
     for x in list.items {
+        if is_ignore_file(x.name.as_str()) {
+            continue;
+        }
         if x.name.eq("passbook") {
             continue;
         }
@@ -84,6 +93,9 @@ pub async fn list_remote_folder_file(
             .request()
             .await?;
         for x in list.items {
+            if is_ignore_file(x.name.as_str()) {
+                continue;
+            }
             if x.name.eq("passbook") {
                 continue;
             }
@@ -101,6 +113,13 @@ pub async fn list_local_folder_file(
         .with_context(|| format!("read dir failed: {}", source_path))?;
     let mut metadata_list = vec![];
     while let Some(entry) = entries.next_entry().await? {
+        let file_name = entry.file_name();
+        let file_name = file_name
+            .to_str()
+            .with_context(|| format!("file name failed: {:?}", entry.path()))?;
+        if is_ignore_file(file_name) {
+            continue;
+        }
         let metadata = entry.metadata().await?;
         metadata_list.push((entry.path(), metadata));
     }
@@ -232,4 +251,12 @@ pub async fn delete_remote_file(
         }
     }
     Ok(())
+}
+
+fn is_ignore_file(file_name: &str) -> bool {
+    file_name.starts_with('.')
+        || file_name.eq("System Volume Information")
+        || file_name.eq("RECYCLE.BIN")
+        || file_name.eq("desktop.ini")
+        || file_name.eq("Thumbs.db")
 }

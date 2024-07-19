@@ -123,7 +123,7 @@ async fn up_sync_folder(
     folder_id: String,
     sync_password: Option<Vec<u8>>,
 ) -> anyhow::Result<()> {
-    println!("正在同步 : {}", source_path);
+    println!("向云端同步 : {}", source_path);
     // 读取本地的文件
     let metadata_list = list_local_folder_file(&source_path).await?;
     // 读取远端文件
@@ -137,9 +137,9 @@ async fn up_sync_folder(
     for (pb, m) in &metadata_list {
         let name = pb
             .file_name()
-            .with_context(|| "文件名未空(1)")?
+            .with_context(|| "文件名为空(1)")?
             .to_str()
-            .with_context(|| "f文件名未空(2)")?
+            .with_context(|| "文件名为空(2)")?
             .to_string();
         if name.is_empty() {
             return Err(anyhow::anyhow!("文件名未空(3)"));
@@ -151,7 +151,6 @@ async fn up_sync_folder(
             local_folder_list.push(name);
         }
     }
-    println!("已拉取云端文件 正在比对");
     for x in &open_file_list {
         let mut delete = true;
         let mut name = x.name.clone();
@@ -160,7 +159,10 @@ async fn up_sync_folder(
             if let Ok(n) = decrypt_file_name(&name, sync_password) {
                 name = n;
             } else {
-                println!("文件名解密失败，删除 : {}", x.name);
+                println!(
+                    "删除云端文件 : {}/{}  (文件名解密失败)",
+                    source_path, x.name
+                );
                 error_file_name = true;
             }
         }
@@ -171,17 +173,23 @@ async fn up_sync_folder(
                         if x.updated_at.timestamp() >= date.timestamp() {
                             delete = false;
                         } else {
-                            println!("云端文件更旧，删除并稍后重新上传 : {}", name)
+                            println!(
+                                "删除云端文件 : {}/{} (云端文件更新时间比本地更早)",
+                                source_path, name
+                            )
                         }
                     } else {
-                        println!("未找到文件，删除 : {}", name)
+                        println!(
+                            "删除云端文件 : {}/{} (本地对应文件已经删除)",
+                            source_path, name
+                        )
                     }
                 }
                 Folder => {
                     if local_folder_list.contains(&name) {
                         delete = false;
                     } else {
-                        println!("未找到文件夹，删除 : {}", name)
+                        println!("删除云端文件 : {}/{}/", source_path, name)
                     }
                 }
             }
@@ -267,7 +275,7 @@ async fn up_sync_file(
     file_name: String,
     sync_password: Option<Vec<u8>>,
 ) -> anyhow::Result<()> {
-    println!("上传 : {} => {}", source_path, file_name);
+    println!("上传至云端 : {}", source_path);
     let md = m
         .modified()
         .with_context(|| "modified is empty")?

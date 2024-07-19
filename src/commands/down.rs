@@ -23,9 +23,9 @@ pub fn command() -> Command {
 
 fn args() -> Vec<clap::Arg> {
     vec![
-        arg!(-s --source <SOURCE_PATH> "remote target uri, like `adrive://drive_id/file_path`"),
-        arg!(-t --target <CONFIG_FILE_PATH> "local source uri, like `file:///tmp/Backups`"),
-        arg!(-p --password <PASSWORD> "password for adrive folder encryption").required(false),
+        arg!(-s --source <SOURCE_PATH> "远端文件夹的地址, 例如 `adrive://drive_id/file_path`"),
+        arg!(-t --target <CONFIG_FILE_PATH> "本地文件夹的地址, 例如 `file:///tmp/Backups`"),
+        arg!(-p --password <PASSWORD> "云端加密密码").required(false),
     ]
 }
 
