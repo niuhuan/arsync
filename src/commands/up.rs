@@ -8,7 +8,7 @@ use alipan::response::AdriveOpenFile;
 use alipan::AdriveOpenFileType::Folder;
 use alipan::{AdriveClient, AdriveOpenFilePartInfoCreate, AdriveOpenFileType, CheckNameMode};
 use anyhow::Context;
-use chrono::{Local, TimeZone};
+use chrono::{TimeZone, Utc};
 use clap::{arg, Command};
 use sha1::Digest;
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ pub fn command() -> Command {
 
 fn args() -> Vec<clap::Arg> {
     vec![
-        arg!(-s --source <SOURCE_PATH> "local source uri, like `file:///tmp/Backups`"),
+        arg!(-s --source <SOURCE_PATH> "本地文件夹的URI, 例如 `file:///tmp/Backups`"),
         arg!(-t --target <CONFIG_FILE_PATH> "remote target uri, like `adrive://drive_id/file_path`"),
         arg!(-p --password <PASSWORD> "password for adrive folder encryption").required(false),
     ]
@@ -133,7 +133,7 @@ async fn up_sync_folder(
     // 整理一个本地留存的文件和修改日期的map
     let mut has_deleted = false;
     let mut local_folder_list = Vec::new();
-    let mut local_file_update_map = HashMap::<String, chrono::DateTime<Local>>::new();
+    let mut local_file_update_map = HashMap::<String, (chrono::DateTime<Utc>, u64)>::new();
     for (pb, m) in &metadata_list {
         let name = pb
             .file_name()
@@ -146,7 +146,13 @@ async fn up_sync_folder(
         }
         if m.is_file() {
             let updated_at = chrono::DateTime::from(m.modified().unwrap());
-            local_file_update_map.insert(name, updated_at);
+            let len = if let Some(_) = &sync_password {
+                let len = m.len();
+                (len / (1 << 20) * ((1 << 20) + 16)) + (len % (1 << 20) + 16)
+            } else {
+                m.len()
+            };
+            local_file_update_map.insert(name, (updated_at, len));
         } else if m.is_dir() {
             local_folder_list.push(name);
         }
@@ -169,8 +175,8 @@ async fn up_sync_folder(
         if !error_file_name {
             match x.r#type {
                 AdriveOpenFileType::File => {
-                    if let Some(date) = local_file_update_map.get(&name) {
-                        if x.updated_at.timestamp() >= date.timestamp() {
+                    if let Some((date, size)) = local_file_update_map.get(&name) {
+                        if *size as i64 == x.size && x.updated_at.timestamp() >= date.timestamp() {
                             delete = false;
                         } else {
                             println!(

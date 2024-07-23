@@ -141,7 +141,7 @@ async fn down_sync_folder(
         }
         match x.r#type {
             AdriveOpenFileType::File => {
-                remote_file_date_map.insert(name, x.updated_at);
+                remote_file_date_map.insert(name, (x.updated_at, x.size));
             }
             AdriveOpenFileType::Folder => {
                 remote_folder_list.push(name);
@@ -161,7 +161,7 @@ async fn down_sync_folder(
                 delete = false;
             }
         } else if m.is_file() {
-            if let Some(date) = remote_file_date_map.get(&file_name) {
+            if let Some((date, size)) = remote_file_date_map.get(&file_name) {
                 let md = m
                     .modified()
                     .with_context(|| "modified is empty")?
@@ -169,7 +169,13 @@ async fn down_sync_folder(
                 let md = chrono::Utc
                     .timestamp_opt(md.as_secs() as i64, md.subsec_nanos())
                     .unwrap();
-                if md.timestamp() >= date.timestamp() {
+                let len = if let Some(_) = &sync_password {
+                    let len = m.len();
+                    (len / (1 << 20) * ((1 << 20) + 16)) + (len % (1 << 20) + 16)
+                } else {
+                    m.len()
+                };
+                if len as i64 == *size && md.timestamp() >= date.timestamp() {
                     delete = false;
                 }
             }
