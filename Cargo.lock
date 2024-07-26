@@ -56,6 +56,8 @@ dependencies = [
 [[package]]
 name = "alipan"
 version = "0.0.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dcbcef546ada19302676c44acd5142f00bc2f8caf6dc543742204203066b7a1"
 dependencies = [
  "anyhow",
  "async-trait",
